@@ -46,7 +46,11 @@ export default async function handler(req, res) {
   }
 
   try {
-    const upstream = await fetch(base + '/chat/completions', {
+    // The token-cap field is provider-dependent: OpenAI's newest models
+    // reject "max_tokens" and demand "max_completion_tokens", while many
+    // compatible servers only know "max_tokens". Try the widely-supported
+    // name first; retry once if corrected.
+    const post = (capField) => fetch(base + '/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
       body: JSON.stringify({
@@ -55,7 +59,7 @@ export default async function handler(req, res) {
         // Roomy on purpose: thinking models (Gemini 2.5, o-series) count
         // hidden reasoning tokens against this cap — too tight and the
         // visible reply starves. The persona keeps replies short anyway.
-        max_tokens: 2000,
+        [capField]: 2000,
         messages: [
           { role: 'system', content: PERSONA },
           { role: 'user', content: [
@@ -65,6 +69,17 @@ export default async function handler(req, res) {
         ],
       }),
     });
+
+    let upstream = await post('max_tokens');
+    if (upstream.status === 400) {
+      const detail = await upstream.text().catch(() => '');
+      if (detail.includes('max_completion_tokens')) {
+        upstream = await post('max_completion_tokens');
+      } else {
+        res.status(502).json({ error: `upstream 400: ${detail.slice(0, 200)}` });
+        return;
+      }
+    }
 
     if (!upstream.ok) {
       const detail = await upstream.text().catch(() => '');

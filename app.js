@@ -280,10 +280,17 @@ function think(pagePng) {
 }
 
 // Tom's in-character apology when the spirit can't answer (from src/main.rs).
+// Each failure class gets its own line so the writer can actually act on it.
 function oracleExcuse(e) {
   e = (e || '').toLowerCase();
-  if (e.includes('401') || e.includes('403') || e.includes('key'))
-    return 'The oracle refused the diary’s key. Tend to it in the settings, and write to me again.';
+  if (e.includes('401') || e.includes('403') || e.includes('invalid key') || e.includes('api key'))
+    return 'The oracle refused the diary’s key. Tend to it in the settings (⚙), and write to me again.';
+  if (e.includes('404'))
+    return 'The diary called out, but nothing answered at that address. Check the Base URL and model name in the settings (⚙).';
+  if (e.includes('429'))
+    return 'The oracle is weary — too many pleas, or an empty purse. Wait a moment, or check your plan’s quota.';
+  if (e.includes('400'))
+    return 'The oracle did not understand the diary’s plea. The model name in the settings (⚙) may be wrong, or not able to see.';
   if (e.includes('network') || e.includes('failed') || e.includes('fetch'))
     return 'The diary cannot reach its oracle. Are you bound to the web?';
   return 'The ink blurred before it could answer. Write to me again.';
@@ -437,13 +444,17 @@ async function askOracle(dataUrl, onChunk, onDone, onError) {
     return;
   }
 
-  const body = {
+  // The token-cap field is provider-dependent: OpenAI's newest models reject
+  // "max_tokens" and demand "max_completion_tokens", while many compatible
+  // servers only know "max_tokens". Send the widely-supported name first and
+  // retry once if corrected (same dance as the Rust original).
+  const makeBody = (capField) => ({
     model: cfg.model,
     stream: cfg.stream,
     // Roomy on purpose: thinking models (Gemini 2.5, o-series) count hidden
     // reasoning tokens against this cap — too tight and the visible reply
     // starves. The persona already keeps replies short; this is only a guard.
-    max_tokens: 2000,
+    [capField]: 2000,
     messages: [
       { role: 'system', content: PERSONA },
       { role: 'user', content: [
@@ -451,14 +462,24 @@ async function askOracle(dataUrl, onChunk, onDone, onError) {
         { type: 'image_url', image_url: { url: dataUrl } },
       ]},
     ],
-  };
+  });
+  const post = (capField) => fetch(cfg.base + '/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.key },
+    body: JSON.stringify(makeBody(capField)),
+  });
 
   try {
-    const resp = await fetch(cfg.base + '/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.key },
-      body: JSON.stringify(body),
-    });
+    let resp = await post('max_tokens');
+    if (resp.status === 400) {
+      const detail = await resp.text().catch(() => '');
+      if (detail.includes('max_completion_tokens')) {
+        resp = await post('max_completion_tokens');
+      } else {
+        onError(`http 400: ${detail.slice(0, 160)}`);
+        return;
+      }
+    }
     if (!resp.ok) {
       const detail = await resp.text().catch(() => '');
       onError(`http ${resp.status}: ${detail.slice(0, 160)}`);
@@ -578,9 +599,94 @@ document.querySelectorAll('.preset').forEach(btn => {
 document.getElementById('gear').addEventListener('click', () => {
   const c = getCfg();
   $base.value = c.base; $key.value = c.key; $model.value = c.model; $stream.checked = c.stream;
+  $result.classList.add('hidden');   // stale test results don't linger
   backdrop.classList.remove('hidden');
 });
 document.getElementById('cfgCancel').addEventListener('click', () => backdrop.classList.add('hidden'));
+
+// ── Test connection: one tiny vision turn, raw result shown unvarnished ──
+// Uses the values currently typed in the dialog (not yet saved). With the
+// fields empty it probes the deployment's server oracle instead, so a
+// Vercel env-var setup can be verified from any device too.
+const $result = document.getElementById('cfgResult');
+function showResult(ok, text) {
+  $result.classList.remove('hidden');
+  $result.style.color = ok ? '#3f6b2a' : '#8b2f2f';
+  $result.textContent = text;
+}
+
+// A small in-memory "handwriting" sample: the word hi on parchment white.
+function testImage() {
+  const c = document.createElement('canvas');
+  c.width = 220; c.height = 90;
+  const x = c.getContext('2d');
+  x.fillStyle = '#faf5e6'; x.fillRect(0, 0, 220, 90);
+  x.fillStyle = '#201a12'; x.font = 'italic 48px cursive';
+  x.fillText('hi', 80, 60);
+  return c.toDataURL('image/png');
+}
+
+document.getElementById('cfgTest').addEventListener('click', async () => {
+  const base = $base.value.trim().replace(/\/+$/, '');
+  const key = $key.value.trim();
+  const model = $model.value.trim() || 'gpt-4o-mini';
+  showResult(true, '⏳ testing…');
+
+  try {
+    if (!base || !key) {
+      // No client config → probe the server-side oracle.
+      const r = await fetch('/api/oracle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: testImage() }),
+      });
+      const t = await r.text().catch(() => '');
+      if (r.ok) {
+        const reply = JSON.parse(t)?.reply || '';
+        showResult(true, '✅ server oracle OK — Tom says: ' + reply.slice(0, 200));
+      } else if (r.status === 404 || r.status === 501) {
+        showResult(false, `⚠ no oracle: fields above are empty AND the deployment has no server key (http ${r.status}). Fill in a key, or set RIDDLE_OPENAI_KEY on Vercel.`);
+      } else {
+        showResult(false, `❌ server oracle http ${r.status}: ${t.slice(0, 300)}`);
+      }
+      return;
+    }
+
+    // Client config → call the endpoint directly, non-streamed, with retry
+    // on the provider-dependent token-cap field name.
+    const post = (capField) => fetch(base + '/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+      body: JSON.stringify({
+        model, stream: false, [capField]: 2000,
+        messages: [
+          { role: 'system', content: PERSONA },
+          { role: 'user', content: [
+            { type: 'text', text: 'Reply to what is written in the diary.' },
+            { type: 'image_url', image_url: { url: testImage() } },
+          ]},
+        ],
+      }),
+    });
+    let r = await post('max_tokens');
+    if (r.status === 400) {
+      const detail = await r.text().catch(() => '');
+      if (detail.includes('max_completion_tokens')) r = await post('max_completion_tokens');
+      else { showResult(false, '❌ http 400: ' + detail.slice(0, 300)); return; }
+    }
+    if (!r.ok) {
+      const detail = await r.text().catch(() => '');
+      showResult(false, `❌ http ${r.status}: ${detail.slice(0, 300)}`);
+      return;
+    }
+    const json = await r.json();
+    const reply = json?.choices?.[0]?.message?.content || '';
+    if (reply) showResult(true, '✅ OK — Tom says: ' + reply.slice(0, 200));
+    else showResult(false, '⚠ connected, but the reply was empty — the model may not support vision, or a thinking model spent all its tokens. Raw: ' + JSON.stringify(json).slice(0, 250));
+  } catch (err) {
+    showResult(false, '❌ fetch failed: ' + (err?.message || err) + ' — wrong Base URL, no internet, or the endpoint blocks browser (CORS) requests.');
+  }
+});
 document.getElementById('cfgSave').addEventListener('click', () => {
   localStorage.setItem('riddle.base', $base.value.trim());
   localStorage.setItem('riddle.key', $key.value.trim());
