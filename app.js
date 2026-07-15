@@ -432,6 +432,10 @@ function getCfg() {
   };
 }
 
+// The Anthropic (Claude) API speaks its own Messages format, not the
+// OpenAI /chat/completions one — detect it by base URL.
+function isAnthropic(base) { return /(^|\/\/)api\.anthropic\.com/.test(base); }
+
 async function askOracle(dataUrl, onChunk, onDone, onError) {
   const cfg = getCfg();
 
@@ -441,6 +445,11 @@ async function askOracle(dataUrl, onChunk, onDone, onError) {
   if (!cfg.key || !cfg.base) {
     const served = await askServerOracle(dataUrl, onChunk, onDone, onError);
     if (!served) demoOracle(onChunk, onDone);
+    return;
+  }
+
+  if (isAnthropic(cfg.base)) {
+    await askClaude(dataUrl, cfg, onChunk, onDone, onError);
     return;
   }
 
@@ -497,6 +506,82 @@ async function askOracle(dataUrl, onChunk, onDone, onError) {
     }
   } catch (err) {
     onError('network/fetch failed: ' + (err?.message || err));
+  }
+}
+
+// Anthropic Claude via the native Messages API. Vision goes in as a base64
+// image content block; the special CORS header permits direct browser calls
+// (the key lives only in this browser's localStorage).
+async function askClaude(dataUrl, cfg, onChunk, onDone, onError) {
+  const b64 = dataUrl.split(',')[1];
+  const body = {
+    model: cfg.model,
+    max_tokens: 1000,           // persona keeps replies to 1–3 sentences
+    stream: cfg.stream,
+    system: PERSONA,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: b64 } },
+        { type: 'text', text: 'Reply to what is written in the diary.' },
+      ],
+    }],
+  };
+
+  try {
+    const resp = await fetch(cfg.base.replace(/\/+$/, '') + '/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': cfg.key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '');
+      onError(`http ${resp.status}: ${detail.slice(0, 160)}`);
+      return;
+    }
+
+    if (cfg.stream && resp.body) {
+      await readAnthropicSSE(resp.body, onChunk);
+      onDone();
+    } else {
+      const json = await resp.json();
+      const text = (json?.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+      onChunk(text);
+      onDone();
+    }
+  } catch (err) {
+    onError('network/fetch failed: ' + (err?.message || err));
+  }
+}
+
+// Parse an Anthropic SSE stream: text arrives as content_block_delta events
+// carrying {delta: {type: "text_delta", text}}.
+async function readAnthropicSSE(stream, onChunk) {
+  const reader = stream.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line.startsWith('data:')) continue;
+      try {
+        const ev = JSON.parse(line.slice(5).trim());
+        if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && ev.delta.text) {
+          onChunk(ev.delta.text);
+        }
+        if (ev.type === 'message_stop') return;
+      } catch { /* keep-alive / partial line */ }
+    }
   }
 }
 
@@ -583,6 +668,7 @@ const $stream = document.getElementById('cfgStream');
 // Gemini is reached through Google's OpenAI-compatible endpoint; the key is
 // a normal AI Studio key (aistudio.google.com/apikey).
 const PRESETS = {
+  claude:     { base: 'https://api.anthropic.com',                                model: 'claude-opus-4-8' },
   openai:     { base: 'https://api.openai.com/v1',                                model: 'gpt-4o-mini' },
   gemini:     { base: 'https://generativelanguage.googleapis.com/v1beta/openai',  model: 'gemini-2.0-flash' },
   openrouter: { base: 'https://openrouter.ai/api/v1',                             model: 'openai/gpt-4o-mini' },
@@ -649,6 +735,36 @@ document.getElementById('cfgTest').addEventListener('click', async () => {
       } else {
         showResult(false, `❌ server oracle http ${r.status}: ${t.slice(0, 300)}`);
       }
+      return;
+    }
+
+    // Anthropic Claude → native Messages API, one non-streamed turn.
+    if (isAnthropic(base)) {
+      const r = await fetch(base + '/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': key,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model, max_tokens: 300, system: PERSONA,
+          messages: [{ role: 'user', content: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: testImage().split(',')[1] } },
+            { type: 'text', text: 'Reply to what is written in the diary.' },
+          ]}],
+        }),
+      });
+      if (!r.ok) {
+        const detail = await r.text().catch(() => '');
+        showResult(false, `❌ http ${r.status}: ${detail.slice(0, 300)}`);
+        return;
+      }
+      const json = await r.json();
+      const reply = (json?.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+      if (reply) showResult(true, '✅ OK — Tom says: ' + reply.slice(0, 200));
+      else showResult(false, '⚠ connected, but the reply was empty. Raw: ' + JSON.stringify(json).slice(0, 250));
       return;
     }
 

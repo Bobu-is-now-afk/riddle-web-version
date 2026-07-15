@@ -1,7 +1,14 @@
 // Vercel serverless function: the diary's oracle, with the API key kept
 // server-side (never exposed to visitors).
 //
-// Set these in Vercel → Project → Settings → Environment Variables:
+// Set ONE provider in Vercel → Project → Settings → Environment Variables:
+//
+// Anthropic Claude (native Messages API; takes precedence when set):
+//   RIDDLE_ANTHROPIC_KEY   (required)  sk-ant-… from platform.claude.com
+//   RIDDLE_ANTHROPIC_MODEL (optional)  default claude-opus-4-8
+//                                      (claude-haiku-4-5 is the budget pick)
+//
+// Any OpenAI-compatible endpoint:
 //   RIDDLE_OPENAI_KEY    (required)  e.g. sk-… (or a Google AI Studio key)
 //   RIDDLE_OPENAI_BASE   (optional)  default https://api.openai.com/v1
 //   RIDDLE_OPENAI_MODEL  (optional)  default gpt-4o-mini  (must support vision)
@@ -30,8 +37,9 @@ export default async function handler(req, res) {
     return;
   }
 
+  const anthropicKey = process.env.RIDDLE_ANTHROPIC_KEY;
   const key = process.env.RIDDLE_OPENAI_KEY;
-  if (!key) {
+  if (!anthropicKey && !key) {
     // No key configured on the deployment → tell the client to use demo mode.
     res.status(501).json({ error: 'no oracle configured' });
     return;
@@ -42,6 +50,43 @@ export default async function handler(req, res) {
   const image = req.body && req.body.image;
   if (typeof image !== 'string' || !image.startsWith('data:image/png;base64,') || image.length > 4_000_000) {
     res.status(400).json({ error: 'expected { image: "data:image/png;base64,…" }' });
+    return;
+  }
+
+  // ── Anthropic Claude (native Messages API) ──
+  if (anthropicKey) {
+    try {
+      const upstream = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': anthropicKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: process.env.RIDDLE_ANTHROPIC_MODEL || 'claude-opus-4-8',
+          max_tokens: 1000,
+          system: PERSONA,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: 'image/png', data: image.split(',')[1] } },
+              { type: 'text', text: 'Reply to what is written in the diary.' },
+            ],
+          }],
+        }),
+      });
+      if (!upstream.ok) {
+        const detail = await upstream.text().catch(() => '');
+        res.status(502).json({ error: `upstream ${upstream.status}: ${detail.slice(0, 200)}` });
+        return;
+      }
+      const json = await upstream.json();
+      const text = (json.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+      res.status(200).json({ reply: text });
+    } catch (err) {
+      res.status(502).json({ error: 'oracle unreachable: ' + (err?.message || err) });
+    }
     return;
   }
 

@@ -70,7 +70,19 @@ Tap the **⚙** gear in the top-right corner and enter:
 | API Key | `sk-…` |
 | Model | `gpt-4o-mini` (must support vision) |
 
-The dialog has **one-tap presets** for OpenAI, Google Gemini, and OpenRouter that fill in the base URL and a suitable model for you.
+The dialog has **one-tap presets** for Claude, OpenAI, Google Gemini, and OpenRouter that fill in the base URL and a suitable model for you.
+
+#### Using Anthropic Claude
+
+Claude is called through its **native Messages API** (not the OpenAI format) — the app detects the `api.anthropic.com` base URL and switches formats automatically, including streaming.
+
+| Field | Value |
+|---|---|
+| API Base URL | `https://api.anthropic.com` |
+| API Key | `sk-ant-…` from [platform.claude.com](https://platform.claude.com) (no free tier — billing required) |
+| Model | `claude-opus-4-8` (best) or `claude-haiku-4-5` (budget, still vision-capable) |
+
+Server-side on Vercel, use the dedicated variables instead: `RIDDLE_ANTHROPIC_KEY` (takes precedence when set) and optionally `RIDDLE_ANTHROPIC_MODEL`.
 
 #### Using Google Gemini
 
@@ -99,7 +111,9 @@ The key is stored **only in your browser's `localStorage`** and requests go stra
 
    | Name | Value |
    |---|---|
-   | `RIDDLE_OPENAI_KEY` | `sk-…` *(required)* |
+   | `RIDDLE_ANTHROPIC_KEY` | `sk-ant-…` *(use this for Claude; takes precedence)* |
+   | `RIDDLE_ANTHROPIC_MODEL` | `claude-opus-4-8` *(optional, default; `claude-haiku-4-5` for budget)* |
+   | `RIDDLE_OPENAI_KEY` | `sk-…` *(for OpenAI/Gemini/OpenRouter instead)* |
    | `RIDDLE_OPENAI_BASE` | `https://api.openai.com/v1` *(optional, default)* |
    | `RIDDLE_OPENAI_MODEL` | `gpt-4o-mini` *(optional, default; must support vision)* |
 
