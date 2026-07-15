@@ -1,0 +1,7 @@
+{
+  "name": "riddle-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Tom Riddle's Diary (Web Edition) — HTML5 Canvas + Apple Pencil + Vision AI"
+}
