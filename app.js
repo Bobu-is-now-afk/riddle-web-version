@@ -425,7 +425,10 @@ async function askOracle(dataUrl, onChunk, onDone, onError) {
   const body = {
     model: cfg.model,
     stream: cfg.stream,
-    max_tokens: 300,
+    // Roomy on purpose: thinking models (Gemini 2.5, o-series) count hidden
+    // reasoning tokens against this cap — too tight and the visible reply
+    // starves. The persona already keeps replies short; this is only a guard.
+    max_tokens: 2000,
     messages: [
       { role: 'system', content: PERSONA },
       { role: 'user', content: [
@@ -539,6 +542,23 @@ const $base = document.getElementById('cfgBase');
 const $key  = document.getElementById('cfgKey');
 const $model = document.getElementById('cfgModel');
 const $stream = document.getElementById('cfgStream');
+
+// One-tap provider presets (base URL + a sensible vision model).
+// Gemini is reached through Google's OpenAI-compatible endpoint; the key is
+// a normal AI Studio key (aistudio.google.com/apikey).
+const PRESETS = {
+  openai:     { base: 'https://api.openai.com/v1',                                model: 'gpt-4o-mini' },
+  gemini:     { base: 'https://generativelanguage.googleapis.com/v1beta/openai',  model: 'gemini-2.0-flash' },
+  openrouter: { base: 'https://openrouter.ai/api/v1',                             model: 'openai/gpt-4o-mini' },
+};
+document.querySelectorAll('.preset').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const p = PRESETS[btn.dataset.preset];
+    if (!p) return;
+    $base.value = p.base;
+    $model.value = p.model;
+  });
+});
 
 document.getElementById('gear').addEventListener('click', () => {
   const c = getCfg();

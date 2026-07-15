@@ -66,9 +66,23 @@ Tap the **⚙** gear in the top-right corner and enter:
 
 | Field | Example |
 |---|---|
-| API Base URL | `https://api.openai.com/v1` (or OpenRouter, Groq, a local server…) |
+| API Base URL | `https://api.openai.com/v1` (or Gemini, OpenRouter, Groq, a local server…) |
 | API Key | `sk-…` |
 | Model | `gpt-4o-mini` (must support vision) |
+
+The dialog has **one-tap presets** for OpenAI, Google Gemini, and OpenRouter that fill in the base URL and a suitable model for you.
+
+#### Using Google Gemini
+
+Gemini speaks the same protocol through Google's OpenAI-compatible endpoint — no code changes needed:
+
+| Field | Value |
+|---|---|
+| API Base URL | `https://generativelanguage.googleapis.com/v1beta/openai` |
+| API Key | a free key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| Model | `gemini-2.0-flash` (fast) or `gemini-2.5-flash` |
+
+The same values work server-side on Vercel via `RIDDLE_OPENAI_BASE` / `RIDDLE_OPENAI_MODEL` / `RIDDLE_OPENAI_KEY`. Note: Gemini 2.5 models are *thinking* models — their hidden reasoning tokens count against the token cap, which is why the app keeps it roomy (2000).
 
 The key is stored **only in your browser's `localStorage`** and requests go straight from your browser to the endpoint you configured — nothing else leaves your device.
 

@@ -2,9 +2,14 @@
 // server-side (never exposed to visitors).
 //
 // Set these in Vercel → Project → Settings → Environment Variables:
-//   RIDDLE_OPENAI_KEY    (required)  e.g. sk-…
+//   RIDDLE_OPENAI_KEY    (required)  e.g. sk-… (or a Google AI Studio key)
 //   RIDDLE_OPENAI_BASE   (optional)  default https://api.openai.com/v1
 //   RIDDLE_OPENAI_MODEL  (optional)  default gpt-4o-mini  (must support vision)
+//
+// Google Gemini works through its OpenAI-compatible endpoint:
+//   RIDDLE_OPENAI_BASE  = https://generativelanguage.googleapis.com/v1beta/openai
+//   RIDDLE_OPENAI_MODEL = gemini-2.0-flash   (or gemini-2.5-flash)
+//   RIDDLE_OPENAI_KEY   = your AI Studio key (aistudio.google.com/apikey)
 //
 // The persona lives HERE, server-side, and the endpoint only accepts a page
 // image — so it can't be repurposed as a generic LLM proxy.
@@ -47,7 +52,10 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model,
         stream: false,
-        max_tokens: 300,
+        // Roomy on purpose: thinking models (Gemini 2.5, o-series) count
+        // hidden reasoning tokens against this cap — too tight and the
+        // visible reply starves. The persona keeps replies short anyway.
+        max_tokens: 2000,
         messages: [
           { role: 'system', content: PERSONA },
           { role: 'user', content: [
