@@ -1,0 +1,165 @@
+/* ══════════════════════════════════════════════════════════════
+   The Diary of Tom Riddle — web MVP
+   A retro-parchment surface, an ink layer, and the animations that
+   make ink appear, get "drunk" by the page, and re-emerge as a reply.
+   ══════════════════════════════════════════════════════════════ */
+
+:root {
+  --ink:      #201a12;   /* the writer's ink            */
+  --tom-ink:  #2a1d34;   /* Tom's reply, faint violet-black */
+  --parch-1:  #efe2c0;
+  --parch-2:  #e3d2a6;
+  --parch-3:  #d8c390;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #241c12;
+  /* stop the browser from panning/zooming under the pencil */
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ─────────────── the parchment page ─────────────── */
+#diary {
+  position: fixed;
+  inset: 0;
+  touch-action: none;                 /* pencil owns every gesture */
+  background:
+    radial-gradient(120% 90% at 50% 0%,  var(--parch-1) 0%, var(--parch-2) 55%, var(--parch-3) 100%);
+  box-shadow: inset 0 0 220px rgba(80, 55, 20, 0.55);
+  cursor: crosshair;
+}
+
+/* fibrous paper grain (SVG turbulence, no network) */
+#diary::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.35;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'>\
+<filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/>\
+<feColorMatrix type='saturate' values='0'/></filter>\
+<rect width='100%' height='100%' filter='url(%23n)' opacity='0.55'/></svg>");
+}
+
+/* soft aged vignette + a couple of foxing stains */
+#diary::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 40% at 18% 22%, rgba(120, 80, 30, 0.10), transparent 60%),
+    radial-gradient(50% 45% at 82% 78%, rgba(120, 80, 30, 0.12), transparent 60%),
+    radial-gradient(140% 120% at 50% 50%, transparent 55%, rgba(60, 40, 15, 0.34) 100%);
+}
+
+/* ─────────────── canvas layers ─────────────── */
+.layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+#reply { z-index: 5; }
+#ink   { z-index: 10; }
+
+/* The diary "drinks the ink": the whole writing layer soaks into the
+   paper — fading while blurring and lifting slightly, like liquid ink
+   spreading into fibres. Requirement #2: CSS-driven fade. */
+#ink.drinking {
+  animation: drink 1400ms ease-in forwards;
+  pointer-events: none;
+}
+@keyframes drink {
+  0%   { opacity: 1;    filter: blur(0)     saturate(1);   }
+  55%  { opacity: 0.55; filter: blur(0.6px) saturate(0.85);}
+  100% { opacity: 0;    filter: blur(2.4px) saturate(0.6); }
+}
+
+/* Tom's reply lingers, then the paper swallows it too */
+#reply.fading {
+  animation: fadeReply 2200ms ease-in forwards;
+}
+@keyframes fadeReply {
+  from { opacity: 1; filter: blur(0); }
+  to   { opacity: 0; filter: blur(2px); }
+}
+
+/* ─────────────── the tracing quill ─────────────── */
+#quill {
+  position: absolute;
+  z-index: 20;
+  font-size: 30px;
+  line-height: 1;
+  transform: translate(-6px, -26px) rotate(8deg);
+  filter: drop-shadow(0 3px 3px rgba(0,0,0,0.3));
+  opacity: 0;
+  transition: opacity 240ms ease;
+  pointer-events: none;
+  will-change: left, top;
+}
+#quill.writing { opacity: 0.92; }
+
+/* ─────────────── thinking blot ─────────────── */
+#blot {
+  position: absolute;
+  z-index: 20;
+  left: 50%; top: 50%;
+  width: 26px; height: 26px;
+  margin: -13px 0 0 -13px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #3a2c1a, #1c140a);
+  opacity: 0;
+  pointer-events: none;
+}
+#blot.pulsing { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse {
+  0%, 100% { opacity: 0.15; transform: scale(0.7); }
+  50%      { opacity: 0.8;  transform: scale(1.15); }
+}
+
+/* ─────────────── hint + gear ─────────────── */
+#hint {
+  position: absolute;
+  z-index: 15;
+  left: 50%; bottom: 8%;
+  transform: translateX(-50%);
+  margin: 0;
+  text-align: center;
+  font-family: "Caveat", cursive;
+  font-size: clamp(18px, 2.6vw, 26px);
+  color: rgba(70, 50, 22, 0.6);
+  pointer-events: none;
+  transition: opacity 800ms ease;
+}
+#hint span { font-size: 0.72em; opacity: 0.8; }
+#hint.gone { opacity: 0; }
+
+#gear {
+  position: absolute;
+  z-index: 30;
+  top: 14px; right: 16px;
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  border: none;
+  font-size: 20px;
+  color: rgba(70, 50, 22, 0.55);
+  background: rgba(255, 250, 235, 0.35);
+  backdrop-filter: blur(2px);
+  cursor: pointer;
+  transition: color 200ms ease, background 200ms ease;
+}
+#gear:hover { color: rgba(70, 50, 22, 0.9); background: rgba(255, 250, 235, 0.7); }
+
+.hidden { display: none !important; }
