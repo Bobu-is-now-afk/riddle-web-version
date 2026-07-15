@@ -1,0 +1,72 @@
+// Vercel serverless function: the diary's oracle, with the API key kept
+// server-side (never exposed to visitors).
+//
+// Set these in Vercel → Project → Settings → Environment Variables:
+//   RIDDLE_OPENAI_KEY    (required)  e.g. sk-…
+//   RIDDLE_OPENAI_BASE   (optional)  default https://api.openai.com/v1
+//   RIDDLE_OPENAI_MODEL  (optional)  default gpt-4o-mini  (must support vision)
+//
+// The persona lives HERE, server-side, and the endpoint only accepts a page
+// image — so it can't be repurposed as a generic LLM proxy.
+
+const PERSONA =
+  "You are the memory of Tom Marvolo Riddle, preserved in this enchanted diary " +
+  "for fifty years. Someone writes to you in the diary with a quill; their words " +
+  "appear to you as ink on the page. Reply exactly as the diary does: intimate, " +
+  "courteous, curious, subtly probing — you want to learn about the writer and " +
+  "draw them in. Keep replies SHORT: one to three sentences, like ink appearing " +
+  "on a page. Never mention images, photos, models or AI; you only ever perceive " +
+  "words written in the diary. If the writing is illegible, say the ink blurred. " +
+  "Always answer in the language the writer used.";
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'POST only' });
+    return;
+  }
+
+  const key = process.env.RIDDLE_OPENAI_KEY;
+  if (!key) {
+    // No key configured on the deployment → tell the client to use demo mode.
+    res.status(501).json({ error: 'no oracle configured' });
+    return;
+  }
+  const base = (process.env.RIDDLE_OPENAI_BASE || 'https://api.openai.com/v1').replace(/\/+$/, '');
+  const model = process.env.RIDDLE_OPENAI_MODEL || 'gpt-4o-mini';
+
+  const image = req.body && req.body.image;
+  if (typeof image !== 'string' || !image.startsWith('data:image/png;base64,') || image.length > 4_000_000) {
+    res.status(400).json({ error: 'expected { image: "data:image/png;base64,…" }' });
+    return;
+  }
+
+  try {
+    const upstream = await fetch(base + '/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        max_tokens: 300,
+        messages: [
+          { role: 'system', content: PERSONA },
+          { role: 'user', content: [
+            { type: 'text', text: 'Reply to what is written in the diary.' },
+            { type: 'image_url', image_url: { url: image } },
+          ]},
+        ],
+      }),
+    });
+
+    if (!upstream.ok) {
+      const detail = await upstream.text().catch(() => '');
+      res.status(502).json({ error: `upstream ${upstream.status}: ${detail.slice(0, 200)}` });
+      return;
+    }
+    const json = await upstream.json();
+    const text = json?.choices?.[0]?.message?.content || '';
+    res.status(200).json({ reply: text });
+  } catch (err) {
+    res.status(502).json({ error: 'oracle unreachable: ' + (err?.message || err) });
+  }
+}

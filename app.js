@@ -413,8 +413,14 @@ function getCfg() {
 async function askOracle(dataUrl, onChunk, onDone, onError) {
   const cfg = getCfg();
 
-  // No key configured → offline demo so the MVP is playable out of the box.
-  if (!cfg.key || !cfg.base) { demoOracle(onChunk, onDone); return; }
+  // No key configured in the browser → try the deployment's server-side
+  // oracle (/api/oracle on Vercel, key in an env var); fall back to the
+  // offline demo if the deployment has none (static hosting, no key set).
+  if (!cfg.key || !cfg.base) {
+    const served = await askServerOracle(dataUrl, onChunk, onDone, onError);
+    if (!served) demoOracle(onChunk, onDone);
+    return;
+  }
 
   const body = {
     model: cfg.model,
@@ -452,6 +458,32 @@ async function askOracle(dataUrl, onChunk, onDone, onError) {
     }
   } catch (err) {
     onError('network/fetch failed: ' + (err?.message || err));
+  }
+}
+
+// The deployment's own oracle (api/oracle.js on Vercel; key stays server-side).
+// Returns true if it handled the turn (even an upstream error → Tom's excuse),
+// false only when no server oracle exists and the demo should take over.
+async function askServerOracle(dataUrl, onChunk, onDone, onError) {
+  try {
+    const resp = await fetch('/api/oracle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: dataUrl }),
+    });
+    // 404 = static hosting without the function; 501 = deployed but no key.
+    if (resp.status === 404 || resp.status === 501) return false;
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '');
+      onError(`server oracle ${resp.status}: ${detail.slice(0, 160)}`);
+      return true;
+    }
+    const json = await resp.json();
+    onChunk(json.reply || '');
+    onDone();
+    return true;
+  } catch {
+    return false;   // no server at all (e.g. file:// or plain static server)
   }
 }
 

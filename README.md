@@ -70,14 +70,28 @@ Tap the **⚙** gear in the top-right corner and enter:
 | API Key | `sk-…` |
 | Model | `gpt-4o-mini` (must support vision) |
 
-The key is stored **only in your browser's `localStorage`** and requests go straight from your browser to the endpoint you configured — nothing else leaves your device. Leave the settings empty to stay in offline demo mode.
+The key is stored **only in your browser's `localStorage`** and requests go straight from your browser to the endpoint you configured — nothing else leaves your device.
 
-> ⚠️ If you deploy this publicly and want it to answer with *your* key without exposing it to visitors, put the key behind a small serverless proxy (e.g. a Vercel function) instead of entering it client-side.
+**If you leave the settings empty**, the app falls back in order:
 
-### Deploying to Vercel
+1. **Server-side oracle** — `api/oracle.js`, a Vercel serverless function that keeps *your* key in an environment variable, so visitors get real Tom Riddle replies without ever seeing a key.
+2. **Offline demo mode** — canned in-character lines (no AI, ignores what you wrote), so the diary is playable even with no key anywhere.
+
+### Deploying to Vercel (with a server-side key)
 
 1. Push this repo to GitHub.
 2. Import it at [vercel.com/new](https://vercel.com/new) → Framework Preset: **Other** → no build command needed → **Deploy**.
+3. In **Project → Settings → Environment Variables**, add:
+
+   | Name | Value |
+   |---|---|
+   | `RIDDLE_OPENAI_KEY` | `sk-…` *(required)* |
+   | `RIDDLE_OPENAI_BASE` | `https://api.openai.com/v1` *(optional, default)* |
+   | `RIDDLE_OPENAI_MODEL` | `gpt-4o-mini` *(optional, default; must support vision)* |
+
+4. **Redeploy** (Deployments → ⋯ → Redeploy) so the function picks up the variables.
+
+The persona prompt lives inside the function and the endpoint only accepts a page image, so it can't be abused as a general-purpose LLM proxy.
 
 ---
 
