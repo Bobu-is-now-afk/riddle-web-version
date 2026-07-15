@@ -79,7 +79,8 @@ resizeAll();
 // ═══════════════════════════════════════════════════════════════════════
 //  1. CAPTURE — Apple Pencil handwriting via Pointer Events
 // ═══════════════════════════════════════════════════════════════════════
-let cur = null;   // current stroke: {x,y}
+let cur = null;            // current stroke: {x,y}
+let activePointer = null;  // pointerId of the finger/pen currently drawing
 
 function grow(x, y) {
   if (!bbox) bbox = { x0:x, y0:y, x1:x, y1:y };
@@ -90,6 +91,9 @@ function grow(x, y) {
 }
 
 function radiusFor(e) {
+  // Fingers report no useful pressure: a fixed, slightly bolder nib reads
+  // better than a wobbly pressure curve on a phone screen.
+  if (e.pointerType === 'touch') return (PRESSURE_MIN_R + PRESSURE_MAX_R) * 0.55;
   // Apple Pencil reports 0..1 pressure; mouse reports 0.5 / no support.
   const p = (e.pressure && e.pressure > 0) ? e.pressure : 0.5;
   return PRESSURE_MIN_R + (PRESSURE_MAX_R - PRESSURE_MIN_R) * p;
@@ -112,18 +116,28 @@ function drawSeg(x, y, r) {
   hasInk = true;
 }
 
+// Adaptive palm rejection: fingers may draw (phones, tablets without a
+// stylus), but the moment a real pen is seen, touch input is ignored so an
+// Apple Pencil user can rest their hand on the glass.
+let penSeen = false;
+
+function acceptsPointer(e) {
+  if (e.pointerType === 'pen') { penSeen = true; return true; }
+  if (e.pointerType === 'touch') return !penSeen && e.isPrimary; // finger drawing; ignore extra fingers
+  return true;                                                    // mouse (desktop testing)
+}
+
 function onPointerDown(e) {
-  // Only accept the pen (and mouse for desktop testing). Fingers/palm ignored
-  // so an Apple Pencil user can rest their hand on the glass.
-  if (e.pointerType === 'touch') return;
+  if (!acceptsPointer(e)) return;
   if (state !== S.LISTENING) {
     // A touch while a reply lingers dismisses it early (Rust: Lingering→Fading)
     if (state === S.LINGERING) beginReplyFade();
     return;
   }
   e.preventDefault();
-  inkCv.setPointerCapture(e.pointerId);
+  try { inkCv.setPointerCapture(e.pointerId); } catch { /* keep drawing uncaptured */ }
   penDown = true;
+  activePointer = e.pointerId;
   lastPenUp = 0;
   hideHint();
   cur = null;
@@ -131,7 +145,7 @@ function onPointerDown(e) {
 }
 
 function onPointerMove(e) {
-  if (!penDown || state !== S.LISTENING) return;
+  if (!penDown || e.pointerId !== activePointer || state !== S.LISTENING) return;
   e.preventDefault();
   // High-frequency Pencil sampling: replay every coalesced sub-event.
   // (getCoalescedEvents can return [] for some events — fall back to `e`.)
@@ -141,8 +155,9 @@ function onPointerMove(e) {
 }
 
 function onPointerUp(e) {
-  if (!penDown) return;
+  if (!penDown || e.pointerId !== activePointer) return;
   penDown = false;
+  activePointer = null;
   cur = null;
   lastPenUp = performance.now();   // start the 2-second idle clock
 }

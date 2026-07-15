@@ -17,7 +17,7 @@ The Tom Riddle persona prompt, the interaction timings (idle-commit → drink �
 ## ✨ Features
 
 - **Magical Fading Ink:** Write or draw with a stylus. Once you stop writing, the ink gradually fades away, mimicking the diary "absorbing" your words.
-- **Apple Pencil First:** Pointer Events with pressure-sensitive stroke width, full-rate coalesced sampling, and palm rejection (finger touches are ignored while writing).
+- **Apple Pencil First, Finger Friendly:** Pointer Events with pressure-sensitive stroke width and full-rate coalesced sampling. On phones and stylus-less tablets you can draw with a finger; the moment a real stylus is detected, touch switches to palm rejection so Pencil users can rest their hand on the glass.
 - **Vision AI Integration:** The canvas captures your handwriting as an image and sends it to a Vision LLM (e.g., GPT-4o / GPT-4o-mini, or anything OpenAI-compatible) to read and interpret your message.
 - **The Riddle Persona:** The AI is guided by a tailored system prompt to respond in the eerie, manipulative, and charming tone of 16-year-old Tom Riddle — short, intimate, subtly probing, and always in the language you wrote in.
 - **Dynamic Handwriting Playback:** Instead of plain text, Tom's reply is rendered dynamically in a handwriting font (*Dancing Script*), appearing character-by-character onto the parchment with a tracing quill 🪶, then fading back into the page.
