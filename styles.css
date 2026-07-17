@@ -146,6 +146,18 @@ html, body {
 #hint span { font-size: 0.72em; opacity: 0.8; }
 #hint.gone { opacity: 0; }
 
+/* whose soul dwells in the diary — faded name in the top-left corner */
+#soul {
+  position: absolute;
+  z-index: 15;
+  top: 18px; left: 22px;
+  font-family: "Caveat", cursive;
+  font-size: clamp(16px, 2.2vw, 22px);
+  color: rgba(70, 50, 22, 0.45);
+  pointer-events: none;
+  user-select: none;
+}
+
 #gear {
   position: absolute;
   z-index: 30;

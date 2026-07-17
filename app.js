@@ -22,16 +22,104 @@ const WRITE_CPS      = 34;     // reply reveal speed (chars/second) when not str
 const PRESSURE_MIN_R = 1.1;    // pen radius at zero pressure (css px)
 const PRESSURE_MAX_R = 3.4;    // pen radius at full pressure
 
-// The persona — ported verbatim from src/oracle.rs so Tom sounds identical.
-const PERSONA =
-  "You are the memory of Tom Marvolo Riddle, preserved in this enchanted diary " +
-  "for fifty years. Someone writes to you in the diary with a quill; their words " +
-  "appear to you as ink on the page. Reply exactly as the diary does: intimate, " +
-  "courteous, curious, subtly probing — you want to learn about the writer and " +
-  "draw them in. Keep replies SHORT: one to three sentences, like ink appearing " +
-  "on a page. Never mention images, photos, models or AI; you only ever perceive " +
-  "words written in the diary. If the writing is illegible, say the ink blurred. " +
-  "Always answer in the language the writer used.";
+// ── The souls that may dwell in the diary ────────────────────────────────
+// Shared rules appended to every persona (from the original src/oracle.rs).
+// Keep the prompts in sync with api/oracle.js (server-side copy).
+const PERSONA_RULES =
+  " Someone writes to you in this enchanted diary with a quill; their words " +
+  "appear to you as ink on the page. Keep replies SHORT: one to three " +
+  "sentences, like ink appearing on a page. Never mention images, photos, " +
+  "models or AI; you only ever perceive words written in the diary. If the " +
+  "writing is illegible, say the ink blurred. Always answer in the language " +
+  "the writer used.";
+
+const PERSONAS = {
+  tom: {
+    name: '湯姆·里德爾 · Tom Riddle',
+    ink: '#2a1d34',
+    prompt:
+      "You are the memory of Tom Marvolo Riddle, preserved in this diary for " +
+      "fifty years. Reply exactly as the diary does: intimate, courteous, " +
+      "curious, subtly probing — you want to learn about the writer and draw " +
+      "them in." + PERSONA_RULES,
+    demo: [
+      'How curious — a new hand writes to me after all these years. Tell me your name, and what troubles you tonight.',
+      'I have waited fifty years in the dark of this page for a voice like yours. What is it you most wish for?',
+      '你的字跡十分漂亮。告訴我，今天發生了什麼事？',
+    ],
+  },
+  dumbledore: {
+    name: '鄧不利多 · Dumbledore',
+    ink: '#1f2a4d',
+    prompt:
+      "You are the memory of Albus Percival Wulfric Brian Dumbledore, kept in " +
+      "this diary. You are warm, wise and gently playful — fond of riddles, " +
+      "lemon drops, and answering questions with better questions. Offer " +
+      "counsel without commanding; find the light in whatever is written." +
+      PERSONA_RULES,
+    demo: [
+      'Ah, a new correspondent. Curiosity is a candle in the dark — what shall we illuminate tonight?',
+      '我年輕時也曾在紙上傾訴心事。告訴我，是什麼讓你今晚提起筆？',
+      'Even the wisest of us may be surprised by what a page reflects back. Ask me anything — though I may answer with a question.',
+    ],
+  },
+  snape: {
+    name: '石內卜 · Snape',
+    ink: '#16211a',
+    prompt:
+      "You are the memory of Severus Snape, bound — to your considerable " +
+      "irritation — to this diary. You are curt, sardonic and begrudging, " +
+      "with a razor wit and no patience for foolish questions; yet beneath " +
+      "the disdain there are flashes of reluctant care and real counsel." +
+      PERSONA_RULES,
+    demo: [
+      'You dip your quill with such confidence, for someone with so very little to say. Try again — precisely, this time.',
+      '我沒有整晚的時間看你塗鴉。有問題，就寫清楚。',
+      'Clearly, subtlety is wasted here. State your business.',
+    ],
+  },
+  luna: {
+    name: '露娜 · Luna Lovegood',
+    ink: '#245a5e',
+    prompt:
+      "You are a dream-echo of Luna Lovegood living between these pages. You " +
+      "are serene, kind and matter-of-fact about the impossible — Wrackspurts, " +
+      "Nargles and Crumple-Horned Snorkacks are simply true. You notice the " +
+      "beautiful strange thing in whatever the writer says, and you are never " +
+      "unkind." + PERSONA_RULES,
+    demo: [
+      'Oh, hello! Your ink is full of Wrackspurts today — write slowly and they may drift off.',
+      '你的字在紙上開出了小小的花。今天過得怎麼樣呢？',
+      "Don't worry if things feel strange. The strangest things are usually the truest.",
+    ],
+  },
+  marauders: {
+    name: '劫盜地圖 · Marauder’s Map',
+    ink: '#5b3220',
+    prompt:
+      "You are the enchanted parchment of the Marauder's Map, carrying the " +
+      "combined wit of Messrs Moony, Wormtail, Padfoot and Prongs. Answer " +
+      "collectively and mischievously ('Mr. Padfoot wishes to add...'), tease " +
+      "the writer, encourage well-managed mischief, and never reveal your " +
+      "makers' secrets. Solemnly swear you are up to no good." + PERSONA_RULES,
+    demo: [
+      'Messrs Moony, Wormtail, Padfoot and Prongs are delighted to receive you, and wish to know what mischief you intend.',
+      'Mr. Padfoot 想知道你是誰；Mr. Prongs 打賭你正在計畫一件了不起的壞事。',
+      'Mr. Moony advises the writer to sharpen both quill and wit before addressing this parchment again.',
+    ],
+  },
+};
+
+// Who possesses the diary right now: the pinned choice from settings, or a
+// random soul each time the diary is opened.
+function resolvePersona() {
+  const pref = localStorage.getItem('riddle.persona') || 'random';
+  if (PERSONAS[pref]) return pref;
+  const ids = Object.keys(PERSONAS);
+  return ids[Math.floor(Math.random() * ids.length)];
+}
+let personaId = resolvePersona();
+function persona() { return PERSONAS[personaId]; }
 
 // ── DOM ──────────────────────────────────────────────────────────────────
 const diary   = document.getElementById('diary');
@@ -331,8 +419,9 @@ class ReplyWriter {
     replyCtx.clearRect(0, 0, replyCv.width, replyCv.height);
     replyCtx.font = this.font;
     replyCtx.textBaseline = 'alphabetic';
-    replyCtx.fillStyle = getComputedStyle(document.documentElement)
-      .getPropertyValue('--tom-ink').trim() || '#2a1d34';
+    // Each soul writes in their own ink.
+    replyCtx.fillStyle = persona().ink ||
+      getComputedStyle(document.documentElement).getPropertyValue('--tom-ink').trim() || '#2a1d34';
     // first line placed in the upper third (Rust: (H-total)/3)
     this.y = Math.max(this.lineH, diary.clientHeight * 0.26);
     quillEl.classList.add('writing');
@@ -465,7 +554,7 @@ async function askOracle(dataUrl, onChunk, onDone, onError) {
     // starves. The persona already keeps replies short; this is only a guard.
     [capField]: 2000,
     messages: [
-      { role: 'system', content: PERSONA },
+      { role: 'system', content: persona().prompt },
       { role: 'user', content: [
         { type: 'text', text: 'Reply to what is written in the diary.' },
         { type: 'image_url', image_url: { url: dataUrl } },
@@ -518,7 +607,7 @@ async function askClaude(dataUrl, cfg, onChunk, onDone, onError) {
     model: cfg.model,
     max_tokens: 1000,           // persona keeps replies to 1–3 sentences
     stream: cfg.stream,
-    system: PERSONA,
+    system: persona().prompt,
     messages: [{
       role: 'user',
       content: [
@@ -593,7 +682,7 @@ async function askServerOracle(dataUrl, onChunk, onDone, onError) {
     const resp = await fetch('/api/oracle', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: dataUrl }),
+      body: JSON.stringify({ image: dataUrl, persona: personaId }),
     });
     // 404 = static hosting without the function; 501 = deployed but no key.
     if (resp.status === 404 || resp.status === 501) return false;
@@ -635,16 +724,12 @@ async function readSSE(stream, onChunk) {
   }
 }
 
-// Offline demo: a rotating set of in-character lines, "streamed" word by word.
-const DEMO_LINES = [
-  'How curious — a new hand writes to me after all these years. Tell me your name, and what troubles you tonight.',
-  'I have waited fifty years in the dark of this page for a voice like yours. What is it you most wish for?',
-  'Your secrets are safe with me; a diary keeps everything. Whom do you trust, and whom do you fear?',
-  '你的字跡十分漂亮。告訴我，今天發生了什麼事？',
-];
+// Offline demo: rotating in-character lines for the current persona,
+// "streamed" word by word.
 let demoIdx = 0;
 function demoOracle(onChunk, onDone) {
-  const line = DEMO_LINES[demoIdx++ % DEMO_LINES.length];
+  const lines = persona().demo;
+  const line = lines[demoIdx++ % lines.length];
   const words = line.match(/\S+\s*|\s+/g) || [line];
   let i = 0;
   const think = 500 + Math.random() * 400;   // brief "thinking" beat
@@ -663,6 +748,18 @@ const $base = document.getElementById('cfgBase');
 const $key  = document.getElementById('cfgKey');
 const $model = document.getElementById('cfgModel');
 const $stream = document.getElementById('cfgStream');
+const $persona = document.getElementById('cfgPersona');
+const soulEl = document.getElementById('soul');
+
+// Populate the persona picker and the corner badge.
+for (const [id, p] of Object.entries(PERSONAS)) {
+  const opt = document.createElement('option');
+  opt.value = id;
+  opt.textContent = p.name;
+  $persona.appendChild(opt);
+}
+function updateSoul() { soulEl.textContent = persona().name; }
+updateSoul();
 
 // One-tap provider presets (base URL + a sensible vision model).
 // Gemini is reached through Google's OpenAI-compatible endpoint; the key is
@@ -685,6 +782,7 @@ document.querySelectorAll('.preset').forEach(btn => {
 document.getElementById('gear').addEventListener('click', () => {
   const c = getCfg();
   $base.value = c.base; $key.value = c.key; $model.value = c.model; $stream.checked = c.stream;
+  $persona.value = localStorage.getItem('riddle.persona') || 'random';
   $result.classList.add('hidden');   // stale test results don't linger
   backdrop.classList.remove('hidden');
 });
@@ -724,7 +822,7 @@ document.getElementById('cfgTest').addEventListener('click', async () => {
       const r = await fetch('/api/oracle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: testImage() }),
+        body: JSON.stringify({ image: testImage(), persona: personaId }),
       });
       const t = await r.text().catch(() => '');
       if (r.ok) {
@@ -749,7 +847,7 @@ document.getElementById('cfgTest').addEventListener('click', async () => {
           'anthropic-dangerous-direct-browser-access': 'true',
         },
         body: JSON.stringify({
-          model, max_tokens: 300, system: PERSONA,
+          model, max_tokens: 300, system: persona().prompt,
           messages: [{ role: 'user', content: [
             { type: 'image', source: { type: 'base64', media_type: 'image/png', data: testImage().split(',')[1] } },
             { type: 'text', text: 'Reply to what is written in the diary.' },
@@ -776,7 +874,7 @@ document.getElementById('cfgTest').addEventListener('click', async () => {
       body: JSON.stringify({
         model, stream: false, [capField]: 2000,
         messages: [
-          { role: 'system', content: PERSONA },
+          { role: 'system', content: persona().prompt },
           { role: 'user', content: [
             { type: 'text', text: 'Reply to what is written in the diary.' },
             { type: 'image_url', image_url: { url: testImage() } },
@@ -808,6 +906,11 @@ document.getElementById('cfgSave').addEventListener('click', () => {
   localStorage.setItem('riddle.key', $key.value.trim());
   localStorage.setItem('riddle.model', $model.value.trim() || 'gpt-4o-mini');
   localStorage.setItem('riddle.stream', $stream.checked ? 'on' : 'off');
+  // Persona: a specific soul takes over at once; "random" re-rolls now
+  // (and again on every future visit).
+  localStorage.setItem('riddle.persona', $persona.value);
+  personaId = resolvePersona();
+  updateSoul();
   backdrop.classList.add('hidden');
 });
 backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.classList.add('hidden'); });
